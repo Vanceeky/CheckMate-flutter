@@ -39,7 +39,7 @@ class _LoginScreenState extends State<LoginScreen> {
 
   bool isLoading = false;
 
-  Future<void> _login() async {
+/*   Future<void> _login() async {
     final username = usernameController.text.trim();
     final password = passwordController.text.trim();
 
@@ -54,7 +54,7 @@ class _LoginScreenState extends State<LoginScreen> {
 
     try {
       final response = await http.post(
-        Uri.parse('http://10.0.2.2:8000/auth/jwt/create'),
+        Uri.parse('http://192.168.1.2:8000/auth/jwt/create/'),
         headers: {
           'Content-Type': 'application/json',
         },
@@ -116,6 +116,62 @@ class _LoginScreenState extends State<LoginScreen> {
 
   }
 
+ */
+  
+  Future<void> _login() async {
+  final username = usernameController.text.trim();
+  final password = passwordController.text.trim();
+
+  if (username.isEmpty || password.isEmpty) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Please enter both fields.')),
+    );
+    return;
+  }
+
+  setState(() => isLoading = true);
+
+  await Future.delayed(const Duration(seconds: 1)); // simulate delay
+
+  try {
+    // Static test users
+    const testUsers = {
+      'instructor1': {'password': '12345', 'role': 'INSTRUCTOR'},
+      'student1': {'password': '12345', 'role': 'STUDENT'},
+    };
+
+    if (testUsers.containsKey(username) &&
+        testUsers[username]!['password'] == password) {
+      final role = testUsers[username]!['role']!;
+
+      // Save data locally
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('username', username);
+      await prefs.setString('role', role);
+
+      // Navigate based on role
+      if (role == 'INSTRUCTOR') {
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(builder: (_) => InstructorHome()),
+        );
+      } else if (role == 'STUDENT') {
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(builder: (_) => StudentHome()),
+        );
+      }
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Invalid test credentials.')),
+      );
+    }
+  } catch (e) {
+    print('Error: $e');
+  } finally {
+    setState(() => isLoading = false);
+  }
+}
 
   @override
   Widget build(BuildContext context) {

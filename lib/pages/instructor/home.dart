@@ -161,7 +161,7 @@ class _InstructorHomeState extends State<InstructorHome> {
               onTapAction: () {
                 Navigator.push(
                   context,
-                  MaterialPageRoute(builder: (context) => const ScanUploadPage()), // Now imported!
+                  MaterialPageRoute(builder: (context) => const ExamScannerPage()), // Now imported!
                 );
               },
             ),
