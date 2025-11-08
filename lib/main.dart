@@ -136,8 +136,8 @@ class _LoginScreenState extends State<LoginScreen> {
   try {
     // Static test users
     const testUsers = {
-      'instructor1': {'password': '12345', 'role': 'INSTRUCTOR'},
-      'student1': {'password': '12345', 'role': 'STUDENT'},
+      'ivan': {'password': '12345', 'role': 'INSTRUCTOR'},
+      'edward': {'password': '12345', 'role': 'STUDENT'},
     };
 
     if (testUsers.containsKey(username) &&

@@ -14,7 +14,7 @@ class InstructorHome extends StatefulWidget {
 }
 
 class _InstructorHomeState extends State<InstructorHome> {
-  String username = 'Prof. Sarah Johnson';
+  String username = 'Prof. Ivan James';
 
   @override
   void initState() {
