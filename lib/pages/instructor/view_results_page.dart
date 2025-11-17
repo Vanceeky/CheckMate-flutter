@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:syncfusion_flutter_pdfviewer/pdfviewer.dart';
+import 'dart:convert';
+import 'package:http/http.dart' as http;
+import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
   runApp(const MaterialApp(
@@ -16,6 +19,33 @@ class ViewResultsPage extends StatefulWidget {
   State<ViewResultsPage> createState() => _ViewResultsPageState();
 }
 
+
+Future<List<Map<String, dynamic>>> fetchInstructorExams() async {
+  final url = Uri.parse("http://10.0.2.2:8000/api/exams/instructor/");
+  final prefs = await SharedPreferences.getInstance();
+  final accessToken = prefs.getString("access");
+  if (accessToken == null) {
+    throw Exception("No access token found. User might not be logged in.");
+  }
+
+  final response = await http.get(
+    url,
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": "Bearer $accessToken",
+    },
+  );
+
+  if (response.statusCode == 200) {
+    // API already returns a List of maps like your sample
+    final List<dynamic> data = jsonDecode(response.body);
+    // Convert dynamic list to List<Map<String, dynamic>>
+    return data.map((e) => Map<String, dynamic>.from(e)).toList();
+  } else {
+    throw Exception("Failed to load exams: ${response.statusCode}");
+  }
+}
+
 class _ViewResultsPageState extends State<ViewResultsPage>
     with SingleTickerProviderStateMixin {
   late AnimationController _controller;
@@ -23,65 +53,7 @@ class _ViewResultsPageState extends State<ViewResultsPage>
   String searchQuery = "";
 
   // Data is now nested. 'studentResults' is part of the 'exams' list.
-  final List<Map<String, dynamic>> exams = [
-    {
-      'examTitle': 'Prelim Exam', // Kept for data, but removed from UI
-      'subject': 'Human Computer Interaction',
-      'semester': '1st Semester',
-      'schoolYear': '2025-2026',
-      'examType': 'Prelim',
-      'examId': 'EXAM001',
-      'hasScannedSheets': true,
-      'studentResults': [
-        {
-          'name': 'John Doe',
-          'score': 45,
-          'total': 50, // 90%
-          'pdfUrl':
-              'https://cdn.syncfusion.com/content/PDFViewer/flutter-succinctly.pdf'
-        },
-        {
-          'name': 'Jane Smith',
-          'score': 40,
-          'total': 50, // 80%
-          'pdfUrl':
-              'https://cdn.syncfusion.com/content/PDFViewer/flutter-succinctly.pdf'
-        },
-        {
-          'name': 'Peter Pan',
-          'score': 35,
-          'total': 50, // 70% (Fails 75% threshold)
-          'pdfUrl':
-              'https://cdn.syncfusion.com/content/PDFViewer/flutter-succinctly.pdf'
-        },
-      ],
-    },
-    {
-      'examTitle': 'Midterm Exam',
-      'subject': 'Introduction to Computer Programming',
-      'semester': '1st Semester',
-      'schoolYear': '2025-2026',
-      'examType': 'Midterm',
-      'examId': 'EXAM002',
-      'hasScannedSheets': true,
-      'studentResults': [
-        {
-          'name': 'Alice Wonder',
-          'score': 48,
-          'total': 50, // 96%
-          'pdfUrl':
-              'https://cdn.syncfusion.com/content/PDFViewer/flutter-succinctly.pdf'
-        },
-        {
-          'name': 'Bob Builder',
-          'score': 37,
-          'total': 50, // 74% (Fails 75% threshold)
-          'pdfUrl':
-              'https://cdn.syncfusion.com/content/PDFViewer/flutter-succinctly.pdf'
-        },
-      ],
-    },
-  ];
+  final List<Map<String, dynamic>> exams = [];
 
   @override
   void initState() {
@@ -93,7 +65,44 @@ class _ViewResultsPageState extends State<ViewResultsPage>
       CurvedAnimation(parent: _controller, curve: Curves.easeOut),
     );
     _controller.forward();
+    
+    _loadExams(); // fetch exams and set state
   }
+
+bool _isLoading = true;
+
+Future<void> _loadExams() async {
+  setState(() => _isLoading = true); // Show loading spinner
+
+  try {
+    final data = await fetchInstructorExams(); // Fetch from API
+
+    setState(() {
+      exams.clear();
+      exams.addAll(data); // Update the list
+      _isLoading = false; // Hide loading spinner
+    });
+  } catch (e) {
+    setState(() => _isLoading = false);
+    debugPrint("Failed to load exams: $e");
+
+    // Optionally, show error to user
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text("Error"),
+        content: Text("Failed to load exams. Please try again.\n$e"),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text("OK"),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 
   @override
   void dispose() {
@@ -150,10 +159,12 @@ class _ViewResultsPageState extends State<ViewResultsPage>
               const SizedBox(height: 16),
 
               Expanded(
-                child: filteredExams.isEmpty
-                    ? const Center(
-                        child: Text('No exams found.',
-                            style: TextStyle(color: Colors.grey)))
+                child: _isLoading
+                    ? const Center(child: CircularProgressIndicator())
+                    : filteredExams.isEmpty
+                        ? const Center(
+                            child: Text('No exams found.',
+                                style: TextStyle(color: Colors.grey)))
                     : ListView.builder(
                         itemCount: filteredExams.length,
                         itemBuilder: (context, index) {
@@ -508,7 +519,7 @@ class _ExamResultsDetailPageState extends State<ExamResultsDetailPage> {
                                       context,
                                       MaterialPageRoute(
                                         builder: (_) => PDFViewerPage(
-                                          pdfUrl: result['pdfUrl'],
+                                          pdfUrl: "http://10.0.2.2:8000${result['pdfUrl']}",
                                           studentName: result['name'],
                                         ),
                                       ),

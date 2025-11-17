@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'dart:convert'; // For json.encode
+import 'package:http/http.dart' as http;
+import 'package:shared_preferences/shared_preferences.dart';
 
 // --- Data Models (Unchanged from previous) ---
 
@@ -252,7 +254,120 @@ class _CreateAnswerKeyPageState extends State<CreateAnswerKeyPage> {
     });
   }
 
-  Future<void> _saveData() async {
+Future<void> _saveData() async {
+  if (_preparedData == null) return;
+
+  setState(() => _isLoading = true);
+
+  final url = Uri.parse("http://10.0.2.2:8000/api/exams/create/");
+
+  final prefs = await SharedPreferences.getInstance();
+  final token = prefs.getString("access");
+
+  if (token == null) {
+    debugPrint("❌ ERROR: No access token found. User not logged in.");
+    setState(() => _isLoading = false);
+    return;
+  }
+
+  try {
+    debugPrint('--- SENDING TO BACKEND ---');
+    debugPrint(jsonEncode(_preparedData));
+
+    final response = await http.post(
+      url,
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": "Bearer $token",
+      },
+      body: jsonEncode(_preparedData),
+    );
+
+    debugPrint("STATUS CODE: ${response.statusCode}");
+    debugPrint("RESPONSE BODY: ${response.body}");
+
+    setState(() => _isLoading = false);
+
+    if (response.statusCode == 201 || response.statusCode == 200) {
+      // SUCCESS
+      final res = jsonDecode(response.body);
+      final examId = res["examId"] ?? "";
+      final passingScore = res["passingScore"] ?? "";
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (context) => AlertDialog(
+          title: const Text('Success!'),
+          content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(res["message"] ?? "Exam created successfully!"),
+            const SizedBox(height: 12),
+            Text(
+              "Exam ID: $examId",
+              style: const TextStyle(fontWeight: FontWeight.bold),
+            ),
+            Text(
+              "Passing Score: $passingScore",
+              style: const TextStyle(fontWeight: FontWeight.bold),
+            ),
+          ],
+        ),
+          actions: [
+            TextButton(
+              child: const Text('OK'),
+              onPressed: () {
+                Navigator.of(context).pop();
+                Navigator.of(context).pop();
+              },
+            ),
+          ],
+        ),
+      );
+
+    } else {
+      // ERROR FROM BACKEND
+      final res = jsonDecode(response.body);
+
+      showDialog(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text("Error"),
+          content: Text(
+            res["error"] ?? "Something went wrong. Please try again.",
+          ),
+          actions: [
+            TextButton(
+              child: const Text("OK"),
+              onPressed: () => Navigator.pop(context),
+            ),
+          ],
+        ),
+      );
+    }
+  } catch (e) {
+    setState(() => _isLoading = false);
+
+    debugPrint("ERROR: $e");
+
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text("Network Error"),
+        content: Text("Failed to connect to server: $e"),
+        actions: [
+          TextButton(
+            child: const Text("OK"),
+            onPressed: () => Navigator.pop(context),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/*   Future<void> _saveData() async {
     if (_preparedData == null) return;
 
     setState(() => _isLoading = true);
@@ -283,7 +398,7 @@ class _CreateAnswerKeyPageState extends State<CreateAnswerKeyPage> {
       ),
     );
   }
-
+ */
   // --- Build Methods ---
 
   @override

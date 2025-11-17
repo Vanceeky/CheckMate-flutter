@@ -1,24 +1,44 @@
+import 'dart:convert';
+import 'dart:ffi';
+
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:syncfusion_flutter_pdfviewer/pdfviewer.dart';
 import 'dart:async'; // Needed for Future.delayed
+import 'package:http/http.dart' as http;
 
 // -------------------- NEW DATA MODELS --------------------
+
+String formatDate(DateTime date) {
+  const months = [
+    "JAN", "FEB", "MAR", "APR", "MAY", "JUNE",
+    "JULY", "AUG", "SEPT", "OCT", "NOV", "DEC"
+  ];
+
+  return "${date.year}-${months[date.month - 1]}-${date.day.toString().padLeft(2, '0')}";
+}
 
 /// Represents a single section of an exam's score breakdown
 class SectionScore {
   final String sectionTitle;
-  final int score;
-  final int total;
+  final double score;
+  final double total;
 
   SectionScore({
     required this.sectionTitle,
     required this.score,
     required this.total,
   });
+
+  factory SectionScore.fromJson(Map<String, dynamic> json) {
+    return SectionScore(
+      sectionTitle: json['sectionTitle'] ?? '',
+      score: (json['score'] ?? 0).toDouble(), // Use toDouble()
+      total: (json['total'] ?? 0).toDouble(), // Use toDouble()
+    );
+  }
 }
 
-/// Represents the full details of a single exam (for the details page)
 class ExamDetails {
   final String id;
   final String title;
@@ -27,8 +47,10 @@ class ExamDetails {
   final String schoolYear;
   final String date;
   final String status;
-  final String pdfUrl;
+  final String? pdfUrl;
   final List<SectionScore> breakdown;
+  final double score; // ✅ ADDED
+  final double totalPoints; // ✅ ADDED
 
   ExamDetails({
     required this.id,
@@ -40,93 +62,35 @@ class ExamDetails {
     required this.status,
     required this.pdfUrl,
     required this.breakdown,
+    required this.score, // ✅ ADDED
+    required this.totalPoints, // ✅ ADDED
   });
 
-  // Getters to calculate totals dynamically
-  int get totalScore =>
-      breakdown.fold(0, (sum, item) => sum + item.score);
-  
-  int get totalQuestions =>
-      breakdown.fold(0, (sum, item) => sum + item.total);
+  /// ✅ ADDED: A calculated property for the percentage
+  double get percentage => totalPoints > 0 ? score / totalPoints : 0.0;
 
-  double get percentage =>
-      totalQuestions > 0 ? totalScore / totalQuestions : 0.0;
+  factory ExamDetails.fromJson(Map<String, dynamic> json) {
+    return ExamDetails(
+      id: json['examId'] ?? '',
+      title: json['title'] ?? '',
+      subject: json['subject'] ?? '',
+      semester: json['semester'] ?? '',
+      schoolYear: json['schoolYear'] ?? '',
+      date: json['submitted_at'] ?? '',
+      status: json['status']?.toString() ?? 'Failed',
+      pdfUrl: json['pdfUrl'],
+      breakdown: json['breakdown'] != null
+          ? (json['breakdown'] as List)
+              .map((e) => SectionScore.fromJson(e))
+              .toList()
+          : [],
+      // ✅ ADDED: Parse score and total_points from the JSON
+      // (Matches your ExamSubmission model)
+      score: (json['score'] ?? 0).toDouble(),
+      totalPoints: (json['total_points'] ?? 0).toDouble(),
+    );
+  }
 }
-
-/// Represents the summary of an exam (for the dashboard list)
-class Exam {
-  final String id;
-  final String title;
-  final String subject;
-  final String semester;
-  final String schoolYear;
-  final String date;
-  final int questions; // Total questions
-  final int score;     // Total score
-  final String status;
-
-  Exam({
-    required this.id,
-    required this.title,
-    required this.subject,
-    required this.semester,
-    required this.schoolYear,
-    required this.date,
-    required this.questions,
-    required this.score,
-    required this.status,
-  });
-}
-
-// -------------------- DUMMY DATABASE --------------------
-// This simulates your backend database. The `ExamDetailsPage` will
-// "fetch" from this map using the exam ID.
-
-final Map<String, ExamDetails> dummyExamDetailsDatabase = {
-  'MATH-001': ExamDetails(
-    id: 'MATH-001',
-    title: 'Finals',
-    subject: 'Introduction to Computer Programming',
-    semester: '1st Semester',
-    schoolYear: '2023-2024',
-    date: '1/15/2024',
-    status: 'Passed',
-    pdfUrl: 'https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf',
-    breakdown: [
-      SectionScore(sectionTitle: 'Multiple Choice', score: 40, total: 50),
-      SectionScore(sectionTitle: 'Problem Solving', score: 30, total: 30),
-      SectionScore(sectionTitle: 'Identification', score: 15, total: 20),
-    ],
-  ),
-  'PHYS-002': ExamDetails(
-    id: 'PHYS-002',
-    title: 'Midterm',
-    subject: 'Human Computer Interaction',
-    semester: '1st Semester',
-    schoolYear: '2023-2024',
-    date: '1/12/2024',
-    status: 'Passed',
-    pdfUrl: 'https://www.africau.edu/images/default/sample.pdf', // Different PDF
-    breakdown: [
-      SectionScore(sectionTitle: 'Multiple Choice', score: 15, total: 20),
-      SectionScore(sectionTitle: 'Essay', score: 5, total: 5),
-    ],
-  ),
-  'CHEM-003': ExamDetails(
-    id: 'CHEM-003',
-    title: 'prelim',
-    subject: 'Data Structures and Algorithms',
-    semester: '1st Semester',
-    schoolYear: '2023-2024',
-    date: '1/10/2024',
-    status: 'Passed',
-    pdfUrl: 'https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf',
-    breakdown: [
-      SectionScore(sectionTitle: 'Multiple Choice', score: 20, total: 30),
-      SectionScore(sectionTitle: 'Laboratory', score: 15, total: 10), // Example: extra credit
-    ],
-  ),
-};
 
 
 // -------------------- MAIN STUDENT DASHBOARD --------------------
@@ -137,64 +101,79 @@ class StudentHome extends StatefulWidget {
   State<StudentHome> createState() => _StudentHomeState();
 }
 
-class _StudentHomeState extends State<StudentHome> {
+class _StudentHomeState extends State<StudentHome> with SingleTickerProviderStateMixin {
   String username = '';
-  List<Exam> exams = [];
+  String email = "";
+  String avatar = "";
+  String fullAvatarUrl = "";
+    late AnimationController _controller;
+  late Animation<Offset> _offsetAnimation;
+  String searchQuery = "";
+
+  List<ExamDetails> exams = [];
+
+  // ✅ Add this
+  bool isLoading = false;
+
 
   @override
   void initState() {
     super.initState();
-    _loadUsername();
-    _loadDummyExams();
+    _controller = AnimationController(
+        vsync: this, duration: const Duration(milliseconds: 700));
+    _offsetAnimation = Tween<Offset>(begin: const Offset(0, 0.2), end: Offset.zero)
+        .animate(
+      CurvedAnimation(parent: _controller, curve: Curves.easeOut),
+    );
+    _controller.forward();
+    _loadUserData();
+    _fetchStudentExams();
   }
 
-  Future<void> _loadUsername() async {
+  Future<void> _loadUserData() async {
     final prefs = await SharedPreferences.getInstance();
-    setState(() {
-      username = prefs.getString('username') ?? 'Student';
-    });
-  }
 
-  void _loadDummyExams() {
-    // This data is now just for the *list*. The details are in the
-    // `dummyExamDetailsDatabase`. We just need to make sure the IDs match.
-    setState(() {
-      exams = [
-        Exam(
-          id: 'MATH-001',
-          title: 'Finals',
-          subject: 'Introduction to Computer Programming',
-          semester: '1st Semester',
-          schoolYear: '2023-2024',
-          date: '1/15/2024',
-          questions: 100, // 50 + 30 + 20 from details
-          score: 85,      // 40 + 30 + 15 from details
-          status: 'Passed',
-        ),
-        Exam(
-          id: 'PHYS-002',
-          title: 'midterm',
-          subject: 'Human Computer Interaction',
-          semester: '1st Semester',
-          schoolYear: '2023-2024',
-          date: '1/12/2024',
-          questions: 25, // 20 + 5 from details
-          score: 20,     // 15 + 5 from details
-          status: 'Passed',
-        ),
-        Exam(
-          id: 'CHEM-003',
-          title: 'prelim',
-          subject: 'Data Structures and Algorithms',
-          semester: '1st Semester',
-          schoolYear: '2023-2024',
-          date: '1/10/2024',
-          questions: 40, // 30 + 10 from details
-          score: 35,     // 20 + 15 from details
-          status: 'Passed',
-        ),
-      ];
-    });
+    username = prefs.getString('username') ?? "Student";
+    email = prefs.getString('email') ?? "No email";
+    avatar = prefs.getString('avatar') ?? "";
+
+    // Convert relative Django media path -> full URL
+    if (avatar.isNotEmpty) {
+      fullAvatarUrl = "http://10.0.2.2:8000$avatar";
+    }
+
+    setState(() {});
+  }
+  Future<void> _fetchStudentExams() async {
+    setState(() => isLoading = true);
+
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final token = prefs.getString("access");
+      if (token == null) throw Exception("No access token found");
+
+      final url = Uri.parse("http://10.0.2.2:8000/api/exams/student/");
+      final response = await http.get(url, headers: {
+        "Content-Type": "application/json",
+        "Authorization": "Bearer $token",
+      });
+
+      if (response.statusCode == 200) {
+        final List<dynamic> data = jsonDecode(response.body);
+
+        setState(() {
+          // Use ExamDetails instead of Exam
+          exams = data.map((e) => ExamDetails.fromJson(e)).toList();
+          isLoading = false;
+        });
+      } else {
+        setState(() => isLoading = false);
+        throw Exception("Failed to fetch exams");
+      }
+    } catch (e) {
+      setState(() => isLoading = false);
+      print(e);
+    }
   }
 
   Future<void> _logout() async {
@@ -216,17 +195,21 @@ class _StudentHomeState extends State<StudentHome> {
           children: [
             UserAccountsDrawerHeader(
               accountName: Text(username),
-              accountEmail: const Text('student@example.com'),
+              accountEmail: Text(email),
               currentAccountPicture: CircleAvatar(
                 backgroundColor: Colors.white,
-                child: Text(
-                  username.isNotEmpty ? username[0].toUpperCase() : 'S',
-                  style: const TextStyle(
-                    color: Color(0xFF0083B0),
-                    fontWeight: FontWeight.bold,
-                    fontSize: 22,
-                  ),
-                ),
+                backgroundImage:
+                    fullAvatarUrl.isNotEmpty ? NetworkImage(fullAvatarUrl) : null,
+                child: fullAvatarUrl.isEmpty
+                    ? Text(
+                        username.isNotEmpty ? username[0].toUpperCase() : 'S',
+                        style: const TextStyle(
+                          color: Color(0xFF0083B0),
+                          fontWeight: FontWeight.bold,
+                          fontSize: 22,
+                        ),
+                      )
+                    : null,
               ),
               decoration: const BoxDecoration(
                 gradient: LinearGradient(
@@ -288,14 +271,14 @@ class _StudentHomeState extends State<StudentHome> {
               ],
             ),
             const SizedBox(height: 16),
-            ...exams.map((exam) => _buildExamCard(context, exam)).toList(),
+              ...exams.map((exam) => _buildExamCard(context, exam)).toList(),
           ],
         ),
       ),
     );
   }
 
-  Widget _buildExamCard(BuildContext context, Exam exam) {
+  Widget _buildExamCard(BuildContext context, ExamDetails exam) {
     return GestureDetector(
       onTap: () {
         // MODIFIED: Pass the ID and studentName to the details page
@@ -369,12 +352,21 @@ class _StudentHomeState extends State<StudentHome> {
                     children: [
                       const Icon(Icons.calendar_today, size: 14, color: Colors.grey),
                       const SizedBox(width: 4),
-                      Text(exam.date, style: const TextStyle(color: Colors.grey)),
+
+                      Text(
+                        formatDate(DateTime.parse(exam.date)),   // ← formatted output
+                        style: const TextStyle(color: Colors.grey),
+                      ),
+
                       const SizedBox(width: 12),
-                      Text('${exam.questions} questions',
-                          style: const TextStyle(color: Colors.grey)),
+
+                      Text(
+                        '${exam.totalPoints.toInt()} points',
+                        style: const TextStyle(color: Colors.grey),
+                      ),
                     ],
                   ),
+
                 ],
               ),
             ),
@@ -395,13 +387,13 @@ class _StudentHomeState extends State<StudentHome> {
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
                   decoration: BoxDecoration(
-                    color: Colors.green.shade100,
+                    color: _getBadgeBackground(exam.status),
                     borderRadius: BorderRadius.circular(8),
                   ),
                   child: Text(
                     exam.status,
-                    style: const TextStyle(
-                      color: Colors.green,
+                    style: TextStyle(
+                      color: _getBadgeText(exam.status),
                       fontSize: 12,
                       fontWeight: FontWeight.w500,
                     ),
@@ -442,45 +434,37 @@ class _ExamDetailsPageState extends State<ExamDetailsPage> {
     _fetchExamDetails();
   }
 
-  Future<void> _fetchExamDetails() async {
-    setState(() {
-      isLoading = true;
+Future<void> _fetchExamDetails() async {
+  setState(() => isLoading = true);
+
+  try {
+    final prefs = await SharedPreferences.getInstance();
+    final token = prefs.getString("access");
+    if (token == null) throw Exception("No access token found");
+
+    final url = Uri.parse("http://10.0.2.2:8000/api/exams/student/${widget.examId}/");
+    final response = await http.get(url, headers: {
+      "Content-Type": "application/json",
+      "Authorization": "Bearer $token",
     });
 
-    // TODO: Uncomment and replace with your backend API call
-    /*
-    try {
-      final response = await http.get(
-        Uri.parse('https://your-api/exams/${widget.examId}'),
-      );
-      if (response.statusCode == 200) {
-        // Parse the JSON response into your ExamDetails model
-        final details = ExamDetails.fromJson(json.decode(response.body));
-        setState(() {
-          examDetails = details;
-          isLoading = false;
-        });
-      } else {
-        // Handle error
-        setState(() { isLoading = false; });
-      }
-    } catch (e) {
-      // Handle exception
-      setState(() { isLoading = false; });
+    if (response.statusCode == 200) {
+      final data = jsonDecode(response.body);
+      setState(() {
+        examDetails = ExamDetails.fromJson(data);
+        isLoading = false;
+      });
+    } else {
+      setState(() => isLoading = false);
+      throw Exception("Failed to fetch exam details");
     }
-    */
-
-    // ----- DUMMY API CALL -----
-    // Simulating a network delay
-    await Future.delayed(const Duration(seconds: 1));
-
-    setState(() {
-      // Fetching from our dummy "database"
-      examDetails = dummyExamDetailsDatabase[widget.examId];
-      isLoading = false;
-    });
-    // --------------------------
+  } catch (e) {
+    setState(() => isLoading = false);
+    print(e);
   }
+}
+
+
 
   @override
   Widget build(BuildContext context) {
@@ -554,7 +538,8 @@ class _ExamDetailsPageState extends State<ExamDetailsPage> {
                     const Icon(Icons.calendar_today,
                         size: 14, color: Colors.grey),
                     const SizedBox(width: 4),
-                    Text(exam.date,
+                    
+                    Text(formatDate(DateTime.parse(exam.date)),
                         style: const TextStyle(color: Colors.grey)),
                   ],
                 ),
@@ -563,23 +548,27 @@ class _ExamDetailsPageState extends State<ExamDetailsPage> {
           ),
           Column(
             children: [
-              Text('${exam.totalScore}',
+              Text('${exam.score.toInt()}',
                   style: const TextStyle(
                       fontSize: 28,
                       fontWeight: FontWeight.bold,
                       color: Color(0xFF0083B0))),
               const SizedBox(height: 4),
               Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                 decoration: BoxDecoration(
-                  color: Colors.green.shade100,
+                  color: _getBadgeBackground(exam.status),
                   borderRadius: BorderRadius.circular(8),
                 ),
-                child: Text(exam.status,
-                    style: const TextStyle(
-                        color: Colors.green, fontWeight: FontWeight.w500)),
+                child: Text(
+                  exam.status,
+                  style: TextStyle(
+                    color: _getBadgeText(exam.status),
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
               ),
+
             ],
           ),
         ],
@@ -659,56 +648,58 @@ class _ExamDetailsPageState extends State<ExamDetailsPage> {
           const SizedBox(height: 24),
 
           // MODIFIED: Added "View PDF" button here
-          Center(
-            child: ElevatedButton.icon(
-              icon: const Icon(Icons.picture_as_pdf),
-              label: const Text('View Scanned Sheet'),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFF0083B0),
-                foregroundColor: Colors.white,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-              ),
-              onPressed: () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) => PDFViewerPage(
-                      pdfUrl: exam.pdfUrl, // Use the specific URL
-                      studentName: widget.studentName, // Pass the name
-                    ),
+          // ✅ FIXED: Conditionally show the "View PDF" button
+          if (exam.pdfUrl != null && exam.pdfUrl!.isNotEmpty)
+            Center(
+              child: ElevatedButton.icon(
+                icon: const Icon(Icons.picture_as_pdf),
+                label: const Text('View Scanned Sheet'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF0083B0),
+                  foregroundColor: Colors.white,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
                   ),
-                );
-              },
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                ),
+                onPressed: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => PDFViewerPage(
+                        pdfUrl: exam.pdfUrl!, // Use the ! (null-assert)
+                        studentName: widget.studentName,
+                      ),
+                    ),
+                  );
+                },
+              ),
             ),
-          ),
         ],
       ),
     );
   }
 
   // MODIFIED: Updated signature to take real scores
-  Widget _progressBar(String title, int score, int total) {
-    final double value = total > 0 ? score / total : 0.0;
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 8.0),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Text(title,
-                  style: const TextStyle(
-                      fontSize: 14, fontWeight: FontWeight.w500)),
-              Text('$score / $total',
-                  style: const TextStyle(
-                      fontSize: 14, fontWeight: FontWeight.w500)),
-            ],
-          ),
+Widget _progressBar(String title, double score, double total) { // ✅ FIXED
+  final double value = total > 0 ? score / total : 0.0;
+  return Padding(
+    padding: const EdgeInsets.only(bottom: 8.0),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Text(title,
+                style: const TextStyle(
+                    fontSize: 14, fontWeight: FontWeight.w500)),
+            Text('${score.toInt()} / ${total.toInt()}', // ✅ FIXED
+                style: const TextStyle(
+                    fontSize: 14, fontWeight: FontWeight.w500)),
+          ],
+        ),
           const SizedBox(height: 4),
           LinearProgressIndicator(
             value: value,
@@ -766,5 +757,29 @@ Color _getBadgeColor(String title) {
       return Colors.green;
     default:
       return Colors.grey;
+  }
+}
+
+Color _getBadgeText(String title) {
+  switch (title.toLowerCase()) {
+    case 'passed':
+      return Colors.green;
+    case 'failed':
+      return Colors.redAccent;
+    default:
+      return Colors.grey;
+  }
+}
+
+
+// helper method
+Color _getBadgeBackground(String title) {
+  switch (title.toLowerCase()) {
+    case 'passed':
+      return Colors.green.shade100;
+    case 'failed':
+      return Colors.red.shade100;
+    default:
+      return Colors.grey.shade300;
   }
 }

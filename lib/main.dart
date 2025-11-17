@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 
 import 'package:http/http.dart' as http;
 import 'dart:convert';
-import 'package:jwt_decode/jwt_decode.dart';
+import 'package:jwt_decoder/jwt_decoder.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:v1checkmate/pages/instructor/home.dart';
@@ -118,7 +118,7 @@ class _LoginScreenState extends State<LoginScreen> {
 
  */
   
-  Future<void> _login() async {
+Future<void> _login() async {
   final username = usernameController.text.trim();
   final password = passwordController.text.trim();
 
@@ -131,48 +131,71 @@ class _LoginScreenState extends State<LoginScreen> {
 
   setState(() => isLoading = true);
 
-  await Future.delayed(const Duration(seconds: 1)); // simulate delay
-
   try {
-    // Static test users
-    const testUsers = {
-      'ivan': {'password': '12345', 'role': 'INSTRUCTOR'},
-      'edward': {'password': '12345', 'role': 'STUDENT'},
-    };
+    final url = Uri.parse("http://10.0.2.2:8000/api/auth/jwt/create/");
 
-    if (testUsers.containsKey(username) &&
-        testUsers[username]!['password'] == password) {
-      final role = testUsers[username]!['role']!;
+    final response = await http.post(
+      url,
+      headers: {"Content-Type": "application/json"},
+      body: jsonEncode({
+        "username": username,
+        "password": password,
+      }),
+    );
 
-      // Save data locally
+    if (response.statusCode == 200) {
+      final data = jsonDecode(response.body);
+      final accessToken = data['access'];
+      final refreshToken = data['refresh'];
+
+      // Decode the JWT to get your custom claims
+      final decodedToken = JwtDecoder.decode(accessToken);
+      print('Decoded JWT payload: $decodedToken');
+
+      final role = decodedToken['role'] ?? '';
+      final user = decodedToken['username'] ?? '';
+      final email = decodedToken['email'] ?? '';
+      final avatar = decodedToken['avatar'] ?? '';
+
+
+      // Save locally
       final prefs = await SharedPreferences.getInstance();
-      await prefs.setString('username', username);
+      await prefs.setString('access', accessToken);
+      await prefs.setString('refresh', refreshToken);
       await prefs.setString('role', role);
+      await prefs.setString('username', user);
+      await prefs.setString('email', email);
 
-      // Navigate based on role
-      if (role == 'INSTRUCTOR') {
+      await prefs.setString('avatar', avatar); // safe, even if empty
+
+      
+      // Navigate by role
+      if (role == "instructor") {
         Navigator.pushReplacement(
           context,
           MaterialPageRoute(builder: (_) => InstructorHome()),
         );
-      } else if (role == 'STUDENT') {
+      } else if (role == "student") {
         Navigator.pushReplacement(
           context,
           MaterialPageRoute(builder: (_) => StudentHome()),
         );
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Unknown role.')),
+        );
       }
-    } else {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Invalid test credentials.')),
-      );
     }
+
   } catch (e) {
-    print('Error: $e');
+    print('ERROR: $e');
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Something went wrong.')),
+    );
   } finally {
     setState(() => isLoading = false);
   }
 }
-
   @override
   Widget build(BuildContext context) {
 
@@ -193,7 +216,7 @@ class _LoginScreenState extends State<LoginScreen> {
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
               // Logo AREA
-                Container(
+/*                 Container(
                   padding: const EdgeInsets.all(16),
                   decoration: BoxDecoration(
                     gradient: const LinearGradient(
@@ -208,9 +231,31 @@ class _LoginScreenState extends State<LoginScreen> {
                     color: Colors.white,
                     size: 50,
                   ),
-                ),
+                ), */
 
-                const SizedBox(height: 20),
+                  Container(
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      gradient: const LinearGradient(
+                        colors: [Color.fromARGB(255, 190, 237, 248), Color.fromARGB(255, 1, 157, 209)],
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                      ),
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: Padding(
+                      padding: const EdgeInsets.all(8.0),
+                      child: Image.asset(
+                        'assets/logo2.png',
+                        width: 100,
+                        height: 100,
+                        fit: BoxFit.contain,
+                      ),
+                    ),
+                  ),
+
+
+                const SizedBox(height: 12),
                 const Text(
                   'CheckMate',
                   style: TextStyle(

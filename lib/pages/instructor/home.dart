@@ -14,20 +14,31 @@ class InstructorHome extends StatefulWidget {
 }
 
 class _InstructorHomeState extends State<InstructorHome> {
-  String username = 'Prof. Ivan James';
+  String username = '';
+  String email = "";
+  String avatar = "";
+  String fullAvatarUrl = "";
 
   @override
   void initState() {
     super.initState();
-    _loadUsername();
+    _loadUserData();
   }
 
-  Future<void> _loadUsername() async {
-    final prefs = await SharedPreferences.getInstance();
-    setState(() {
-      username = prefs.getString('username') ?? 'Instructor';
-    });
+Future<void> _loadUserData() async {
+  final prefs = await SharedPreferences.getInstance();
+
+  username = prefs.getString('username') ?? "Instructor";
+  email = prefs.getString('email') ?? "No email";
+  avatar = prefs.getString('avatar') ?? "";
+
+  // Convert relative Django media path -> full URL
+  if (avatar.isNotEmpty) {
+    fullAvatarUrl = "http://10.0.2.2:8000$avatar";
   }
+
+  setState(() {});
+}
 
   Future<void> _logout() async {
     final prefs = await SharedPreferences.getInstance();
@@ -47,13 +58,21 @@ class _InstructorHomeState extends State<InstructorHome> {
           children: [
             UserAccountsDrawerHeader(
               accountName: Text(username),
-              accountEmail: const Text('instructor@example.com'),
+              accountEmail: Text(email),
               currentAccountPicture: CircleAvatar(
                 backgroundColor: Colors.white,
-                child: Text(
-                  username.isNotEmpty ? username[0] : 'I',
-                  style: const TextStyle(color: Color(0xFF0083B0)),
-                ),
+                backgroundImage:
+                    fullAvatarUrl.isNotEmpty ? NetworkImage(fullAvatarUrl) : null,
+                child: fullAvatarUrl.isEmpty
+                    ? Text(
+                        username.isNotEmpty ? username[0].toUpperCase() : 'I',
+                        style: const TextStyle(
+                          color: Color(0xFF0083B0),
+                          fontWeight: FontWeight.bold,
+                          fontSize: 22,
+                        ),
+                      )
+                    : null,
               ),
               decoration: const BoxDecoration(
                 gradient: LinearGradient(
